@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1,user-scalable=no,maximum-scale=1,width=device-width">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+
+    <link rel="stylesheet" href="./resources/ol.css">
+    <link rel="stylesheet" href="resources/fontawesome-all.min.css">
+    <link href="resources/photon-geocoder-autocomplete.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="./resources/ol-layerswitcher.css">
+    <link rel="stylesheet" href="./resources/qgis2web.css">
+
+    <style>
+        html, body {
+            background-color: #ffffff;
+        }
+        .ol-control > * {
+            background-color: #f8f8f8!important;
+            color: #444444!important;
+            border-radius: 0px;
+        }
+        .ol-control > *:hover {
+            background-color: rgba(248, 248, 248, 0.7)!important;
+        }
+        .ol-control {
+            background-color: rgba(255,255,255,.4) !important;
+            padding: 2px !important;
+        }
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+        }
+
+        /* ===========================
+           CUSTOM SEARCH BOX
+        =========================== */
+        #searchBox {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 320px;
+            background: #fff;
+            padding: 8px;
+            border-radius: 10px;
+            box-shadow: 0 6px 14px rgba(0,0,0,0.2);
+            z-index: 9999;
+        }
+        #searchInput {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+        #searchResults {
+            margin-top:6px;
+            background:#fff;
+            border-radius:6px;
+            border:1px solid #e6e6e6;
+            display:none;
+            max-height:200px;
+            overflow-y:auto;
+        }
+        .search-item {
+            padding:8px;
+            cursor:pointer;
+            border-bottom:1px solid #f1f1f1;
+        }
+        .search-item:hover {
+            background:#f5f5f5;
+        }
+
+     
+    </style>
+</head>
+
+<body>
+
+<div id="map">
+    <div id="popup" class="ol-popup">
+        <a href="#" id="popup-closer" class="ol-popup-closer"></a>
+        <div id="popup-content"></div>
+    </div>
+</div>
+
+<!-- ===========================
+     CUSTOM SEARCH UI
+=========================== -->
+<div id="searchBox">
+    <input id="searchInput" placeholder="Cari Nama / Alamat / Kelurahan / Kecamatan..." autocomplete="off">
+    <div id="searchResults"></div>
+</div>
+
+<script src="resources/qgis2web_expressions.js"></script>
+<script src="resources/proj4.js"></script>
+<script>proj4.defs('EPSG:4326','+proj=longlat +datum=WGS84 +no_defs');</script>
+<script src="./resources/functions.js"></script>
+<script src="./resources/ol.js"></script>
+<script src="./resources/ol-layerswitcher.js"></script>
+<script src="resources/photon-geocoder-autocomplete.min.js"></script>
+
+<script src="layers/Batas_Administrasi_Kotamalang_2023_1.js"></script>
+<script src="layers/SUNGAI_LN_25K_2.js"></script>
+<script src="layers/JALAN_LN_25K_3.js"></script>
+<script src="layers/PT_FasilitasKesehatanAtribut_4.js"></script>
+
+<script src="styles/Batas_Administrasi_Kotamalang_2023_1_style.js"></script>
+<script src="styles/SUNGAI_LN_25K_2_style.js"></script>
+<script src="styles/JALAN_LN_25K_3_style.js"></script>
+<script src="styles/PT_FasilitasKesehatanAtribut_4_style.js"></script>
+
+<script src="./layers/layers.js"></script>
+<script src="./resources/Autolinker.min.js"></script>
+<script src="./resources/qgis2web.js"></script>
+
+<!-- ===========================
+     CUSTOM SEARCH ENGINE
+=========================== -->
+<script>
+setTimeout(() => {
+
+    let targetLayer = null;
+    for (let i = 0; i < layersList.length; i++) {
+        let t = layersList[i].get("title") || "";
+        if (/fasilitas/i.test(t)) {
+            targetLayer = layersList[i];
+            break;
+        }
+    }
+
+    if (!targetLayer) return;
+
+    let source = targetLayer.getSource();
+    let features = source.getFeatures();
+
+    let input = document.getElementById("searchInput");
+    let resultsBox = document.getElementById("searchResults");
+
+    let highlightLayer = new ol.layer.Vector({
+        source: new ol.source.Vector(),
+        style: new ol.style.Style({
+            image: new ol.style.Circle({
+                radius: 8,
+                fill: new ol.style.Fill({ color: "rgba(255,165,0,0.9)" }),
+                stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+            })
+        })
+    });
+    map.addLayer(highlightLayer);
+
+    function filter(q) {
+        q = q.toLowerCase();
+        let out = [];
+        features.forEach(f => {
+            let props = f.getProperties();
+            for (let k in props) {
+                if (k === "geometry") continue;
+                let v = String(props[k] || "").toLowerCase();
+                if (v.includes(q)) {
+                    out.push({ feature: f, label: props["Nama"] || props["name"] || v });
+                    break;
+                }
+            }
+        });
+        return out.slice(0, 40);
+    }
+
+    function showResults(arr) {
+        resultsBox.innerHTML = "";
+        if (!arr.length) {
+            resultsBox.style.display = "none";
+            return;
+        }
+        arr.forEach(item => {
+            let div = document.createElement("div");
+            div.className = "search-item";
+            div.innerHTML = item.label;
+            div.onclick = () => selectFeature(item.feature);
+            resultsBox.appendChild(div);
+        });
+        resultsBox.style.display = "block";
+    }
+
+    function selectFeature(f) {
+        resultsBox.style.display = "none";
+        highlightLayer.getSource().clear();
+        highlightLayer.getSource().addFeature(f);
+        let geom = f.getGeometry();
+        map.getView().fit(geom.getExtent(), { duration: 800, maxZoom: 18, padding: [80,80,80,80] });
+    }
+
+    input.oninput = () => {
+        let q = input.value.trim();
+        if (!q) resultsBox.style.display = "none";
+        else showResults(filter(q));
+    };
+
+}, 800);
+</script>
+
+</body>
+</html>
